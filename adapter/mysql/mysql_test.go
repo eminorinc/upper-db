@@ -26,7 +26,9 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"math/rand"
+	"sort"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -391,6 +393,119 @@ func (s *AdapterTests) TestMySQLTypes() {
 			expected := myTypeTests[i]
 			expected.ID = values[i].ID
 			s.Equal(expected, values[i])
+		}
+	}
+}
+
+type mapNotJSON map[string]struct{}
+
+// Value implements the driver Valuer interface.
+func (m mapNotJSON) Value() (driver.Value, error) {
+	if m == nil {
+		return nil, nil
+	}
+	s := make([]string, 0, len(m))
+	for k := range m {
+		s = append(s, k)
+	}
+	sort.Strings(s)
+	return strings.Join(s, ","), nil
+}
+
+// Scan implements the Scanner interface.
+func (m *mapNotJSON) Scan(i interface{}) error {
+	if i == nil {
+		*m = nil
+		return nil
+	}
+	stringSlice := strings.Split(string(i.([]byte)), ",")
+	*m = make(map[string]struct{}, len(stringSlice))
+	for _, i := range stringSlice {
+		(*m)[i] = struct{}{}
+	}
+	return nil
+}
+
+type sliceNotJSON []int
+
+// Value implements the driver Valuer interface.
+func (s sliceNotJSON) Value() (driver.Value, error) {
+	if s == nil {
+		return nil, nil
+	}
+	ss := make([]string, 0, len(s))
+	for _, i := range s {
+		ss = append(ss, strconv.Itoa(i))
+	}
+	return strings.Join(ss, ","), nil
+}
+
+// Scan implements the Scanner interface.
+func (s *sliceNotJSON) Scan(i interface{}) error {
+	if i == nil {
+		*s = nil
+		return nil
+	}
+	stringSlice := strings.Split(string(i.([]byte)), ",")
+	ls := make([]int, 0, len(stringSlice))
+	for _, str := range stringSlice {
+		val, err := strconv.Atoi(str)
+		if err != nil {
+			return err
+		}
+		ls = append(ls, val)
+	}
+	*s = ls
+	return nil
+}
+
+func (s *AdapterTests) TestCustomTypesNotJSON() {
+	sess := s.Session()
+
+	// Getting a pointer to the "data_types" collection.
+	dataTypes := sess.Collection("data_types")
+
+	// Removing all data.
+	err := dataTypes.Truncate()
+	s.NoError(err)
+
+	type testType struct {
+		ID             int64          `db:"id,omitempty"`
+		NullStringTest sql.NullString `db:"_string"`
+	}
+
+	var test *testType
+
+	tt := []struct {
+		input    interface{}
+		expected sql.NullString
+	}{
+		{mapNotJSON(nil), sql.NullString{}},
+		{mapNotJSON{}, sql.NullString{Valid: true, String: ""}},
+		{mapNotJSON{"a": struct{}{}, "b": struct{}{}}, sql.NullString{Valid: true, String: "a,b"}},
+		{map[string]string(nil), sql.NullString{Valid: true, String: "null"}},
+		{map[string]string{}, sql.NullString{Valid: true, String: "{}"}},
+		{map[string]string{"a": "A", "b": "B"}, sql.NullString{Valid: true, String: `{"a":"A","b":"B"}`}},
+		{sliceNotJSON(nil), sql.NullString{}},
+		{sliceNotJSON{}, sql.NullString{Valid: true, String: ""}},
+		{sliceNotJSON{1, 2}, sql.NullString{Valid: true, String: "1,2"}},
+		{[]int(nil), sql.NullString{Valid: true, String: "null"}},
+		{[]int{}, sql.NullString{Valid: true, String: "[]"}},
+		{[]int{1, 2}, sql.NullString{Valid: true, String: "[1,2]"}},
+	}
+	for idx, t := range tt {
+		id := idx + 1
+		_, err = sess.SQL().InsertInto("data_types").Columns("id", "_string").Values(id, t.input).Exec()
+		s.NoError(err)
+
+		test = nil
+		err = dataTypes.Find("id = ?", id).One(&test)
+		s.NoError(err)
+		if t.expected.Valid {
+			s.True(test.NullStringTest.Valid)
+			s.Equal(t.expected.String, test.NullStringTest.String)
+		} else {
+			s.False(test.NullStringTest.Valid)
 		}
 	}
 }
