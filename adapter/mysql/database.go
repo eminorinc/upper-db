@@ -25,13 +25,13 @@
 package mysql
 
 import (
+	"database/sql"
+	"database/sql/driver"
 	"reflect"
 	"strings"
 
-	"database/sql"
-
 	_ "github.com/go-sql-driver/mysql" // MySQL driver.
-	db "github.com/upper/db/v4"
+	"github.com/upper/db/v4"
 	"github.com/upper/db/v4/internal/sqladapter"
 	"github.com/upper/db/v4/internal/sqladapter/exql"
 )
@@ -73,9 +73,12 @@ func (*database) Collections(sess sqladapter.Session) (collections []string, err
 
 func (d *database) ConvertValue(in interface{}) interface{} {
 	switch v := in.(type) {
+	case *driver.Valuer, driver.Valuer:
+		return in
+	case *sql.Scanner, sql.Scanner:
+		return in
 	case *map[string]interface{}:
 		return (*JSONMap)(v)
-
 	case map[string]interface{}:
 		return (*JSONMap)(&v)
 	}
