@@ -446,20 +446,26 @@ func (s *sliceNotJSON) Scan(i interface{}) error {
 		*s = nil
 		return nil
 	}
-	stringSlice := strings.Split(string(i.([]byte)), ",")
-	ls := make([]int, 0, len(stringSlice))
-	for _, str := range stringSlice {
-		val, err := strconv.Atoi(str)
-		if err != nil {
-			return err
+	var ls []int
+	iString := string(i.([]byte))
+	if iString == "" {
+		ls = []int{}
+	} else {
+		stringSlice := strings.Split(iString, ",")
+		ls = make([]int, 0, len(stringSlice))
+		for _, str := range stringSlice {
+			val, err := strconv.Atoi(str)
+			if err != nil {
+				return err
+			}
+			ls = append(ls, val)
 		}
-		ls = append(ls, val)
 	}
 	*s = ls
 	return nil
 }
 
-func (s *AdapterTests) TestCustomTypesNotJSON() {
+func (s *AdapterTests) TestCustomTypes() {
 	sess := s.Session()
 
 	// Getting a pointer to the "data_types" collection.
@@ -507,6 +513,149 @@ func (s *AdapterTests) TestCustomTypesNotJSON() {
 		} else {
 			s.False(test.NullStringTest.Valid)
 		}
+	}
+
+	type testTypeMapNotJSON struct {
+		ID int64 `db:"id,omitempty"`
+
+		MapNotJSON mapNotJSON `db:"_string"`
+	}
+
+	ttMNJ := []struct {
+		input    testTypeMapNotJSON
+		expected sql.NullString
+	}{
+		{testTypeMapNotJSON{}, sql.NullString{}},
+		{testTypeMapNotJSON{MapNotJSON: mapNotJSON{}}, sql.NullString{Valid: true, String: ""}},
+		{testTypeMapNotJSON{MapNotJSON: mapNotJSON{"a": struct{}{}, "b": struct{}{}}}, sql.NullString{Valid: true, String: "a,b"}},
+	}
+	for _, t := range ttMNJ {
+		input := t.input
+		err = dataTypes.InsertReturning(&input)
+		s.NoError(err)
+		s.NotZero(input.ID)
+
+		test = nil
+		err = dataTypes.Find("id = ?", input.ID).One(&test)
+		s.NoError(err)
+		if t.expected.Valid {
+			s.True(test.NullStringTest.Valid)
+			s.Equal(t.expected.String, test.NullStringTest.String)
+		} else {
+			s.False(test.NullStringTest.Valid)
+		}
+
+		loaded := testTypeMapNotJSON{}
+		err = dataTypes.Find("id = ?", input.ID).One(&loaded)
+		s.NoError(err)
+
+		s.Equal(input.MapNotJSON, loaded.MapNotJSON)
+	}
+
+	type testTypeSliceNotJSON struct {
+		ID           int64        `db:"id,omitempty"`
+		SliceNotJSON sliceNotJSON `db:"_string"`
+	}
+	ttSNJ := []struct {
+		input    testTypeSliceNotJSON
+		expected sql.NullString
+	}{
+		{testTypeSliceNotJSON{}, sql.NullString{}},
+		{testTypeSliceNotJSON{SliceNotJSON: sliceNotJSON{}}, sql.NullString{Valid: true, String: ""}},
+		{testTypeSliceNotJSON{SliceNotJSON: sliceNotJSON{1, 2}}, sql.NullString{Valid: true, String: "1,2"}},
+	}
+	for _, t := range ttSNJ {
+		input := t.input
+		err = dataTypes.InsertReturning(&input)
+		s.NoError(err)
+		s.NotZero(input.ID)
+
+		test = nil
+		err = dataTypes.Find("id = ?", input.ID).One(&test)
+		s.NoError(err)
+		if t.expected.Valid {
+			s.True(test.NullStringTest.Valid)
+			s.Equal(t.expected.String, test.NullStringTest.String)
+		} else {
+			s.False(test.NullStringTest.Valid)
+		}
+
+		loaded := testTypeSliceNotJSON{}
+		err = dataTypes.Find("id = ?", input.ID).One(&loaded)
+		s.NoError(err)
+
+		s.Equal(input.SliceNotJSON, loaded.SliceNotJSON)
+	}
+
+	type testTypeMap struct {
+		ID   int64             `db:"id,omitempty"`
+		Map  map[string]string `db:"_string"`
+		Hack bool              `db:"_bool"` // Needed to avoid single value path which will incorrectly handle a map field...
+	}
+	ttM := []struct {
+		input    testTypeMap
+		expected sql.NullString
+	}{
+		{testTypeMap{}, sql.NullString{Valid: true, String: "null"}},
+		{testTypeMap{Map: map[string]string{}}, sql.NullString{Valid: true, String: "{}"}},
+		{testTypeMap{Map: map[string]string{"a": "A", "b": "B"}}, sql.NullString{Valid: true, String: `{"a":"A","b":"B"}`}},
+	}
+	for _, t := range ttM {
+		input := t.input
+		err = dataTypes.InsertReturning(&input)
+		s.NoError(err)
+		s.NotZero(input.ID)
+
+		test = nil
+		err = dataTypes.Find("id = ?", input.ID).One(&test)
+		s.NoError(err)
+		if t.expected.Valid {
+			s.True(test.NullStringTest.Valid)
+			s.Equal(t.expected.String, test.NullStringTest.String)
+		} else {
+			s.False(test.NullStringTest.Valid)
+		}
+
+		loaded := testTypeMap{}
+		err = dataTypes.Find("id = ?", input.ID).One(&loaded)
+		s.NoError(err)
+
+		s.Equal(input.Map, loaded.Map)
+	}
+
+	type testTypeSlice struct {
+		ID    int64 `db:"id,omitempty"`
+		Slice []int `db:"_string"`
+	}
+	ttS := []struct {
+		input    testTypeSlice
+		expected sql.NullString
+	}{
+		{testTypeSlice{}, sql.NullString{Valid: true, String: "null"}},
+		{testTypeSlice{Slice: []int{}}, sql.NullString{Valid: true, String: "[]"}},
+		{testTypeSlice{Slice: []int{1, 2}}, sql.NullString{Valid: true, String: "[1,2]"}},
+	}
+	for _, t := range ttS {
+		input := t.input
+		err = dataTypes.InsertReturning(&input)
+		s.NoError(err)
+		s.NotZero(input.ID)
+
+		test = nil
+		err = dataTypes.Find("id = ?", input.ID).One(&test)
+		s.NoError(err)
+		if t.expected.Valid {
+			s.True(test.NullStringTest.Valid)
+			s.Equal(t.expected.String, test.NullStringTest.String)
+		} else {
+			s.False(test.NullStringTest.Valid)
+		}
+
+		loaded := testTypeSlice{}
+		err = dataTypes.Find("id = ?", input.ID).One(&loaded)
+		s.NoError(err)
+
+		s.Equal(input.Slice, loaded.Slice)
 	}
 }
 

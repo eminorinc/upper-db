@@ -3,6 +3,7 @@ package sqlbuilder
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 
 	"github.com/upper/db/v4"
@@ -31,26 +32,28 @@ func (iq *inserterQuery) processValues() ([]*exql.Values, []interface{}, error) 
 
 	for _, enqueuedValue := range iq.enqueuedValues {
 		if len(enqueuedValue) == 1 {
-			// If and only if we passed one argument to Values.
-			ff, vv, err := Map(enqueuedValue[0], mapOptions)
+			if _, isValuer := enqueuedValue[0].(driver.Valuer); !isValuer {
+				// If and only if we passed one argument to Values, and that value does not implement driver.Valuer.
+				ff, vv, err := Map(enqueuedValue[0], mapOptions)
 
-			if err == nil {
-				// If we didn't have any problem with mapping we can convert it into
-				// columns and values.
-				columns, vals, args, _ := toColumnsValuesAndArguments(ff, vv)
+				if err == nil {
+					// If we didn't have any problem with mapping we can convert it into
+					// columns and values.
+					columns, vals, args, _ := toColumnsValuesAndArguments(ff, vv)
 
-				values, arguments = append(values, vals), append(arguments, args...)
+					values, arguments = append(values, vals), append(arguments, args...)
 
-				if len(iq.columns) == 0 {
-					iq.columns = append(iq.columns, columns.Columns...)
+					if len(iq.columns) == 0 {
+						iq.columns = append(iq.columns, columns.Columns...)
+					}
+					continue
 				}
-				continue
-			}
 
-			// The only error we can expect without exiting is this argument not
-			// being a map or struct, in which case we can continue.
-			if !errors.Is(err, ErrExpectingPointerToEitherMapOrStruct) {
-				return nil, nil, err
+				// The only error we can expect without exiting is this argument not
+				// being a map or struct, in which case we can continue.
+				if !errors.Is(err, ErrExpectingPointerToEitherMapOrStruct) {
+					return nil, nil, err
+				}
 			}
 		}
 
